@@ -6,6 +6,7 @@ var fs = require('fs');
 var express = require('express');
 var gdal = require('gdal');
 var router = express.Router();
+const { createCanvas, Image } = require('canvas')
 
 /**
  * **将图像放在响应中返回**
@@ -17,7 +18,7 @@ function getIMG(res) {
   try {
     //格式必须为 binary 否则会出错
     var content = fs.readFileSync("./test.png", "binary");
-    console.log(content);
+    // console.log(content);
     res.writeHead(200, "Ok");
     res.write(content, "binary"); //格式必须为 binary，否则会出错
   } catch (error) {
@@ -44,34 +45,107 @@ function toBuffer(ab) {
   return buf;
 }
 
+
 router.get('/gdal', (req, res, next) => {
-  let dataset = gdal.open('./japan_origin.tif')
-  let bands = dataset.bands
-  // bands.forEach((band, i) => {
-  //   console.log(band, i);
-  // })
-  let band1 = bands.get(1)
-  var n = 16 * 16;
-  var data = new Float32Array(new ArrayBuffer(n * 4));
-  //read data into the existing array
-  band1.pixels.read(0, 0, 16, 16, data);
-  let data_ = toBuffer(data)
-  console.log(data_);
-  // console.log("number of bands: " + dataset.bands.count());
-  // console.log("width: " + dataset.rasterSize.x);
-  // console.log("height: " + dataset.rasterSize.y);
-  // console.log("geotransform: " + dataset.geoTransform);
-  // console.log("srs: " + (dataset.srs ? dataset.srs.toWKT() : 'null'));
-  res.send(data_)
+  try {
+    let dataset = gdal.open('./10.tif')
+    let bands = dataset.bands
+    let size = 256
+    var n = size * size;
+    let w = size, h = size;
+
+    const canvas = createCanvas(w, h)
+    var ctx = canvas.getContext("2d");
+    const imgData = ctx.createImageData(w, h);
+    // 用时35ms
+    let bandsData = []
+    bands.forEach((band, i) => {     
+      //read data into the existing array
+      var data = new Uint8Array(new ArrayBuffer(n));
+      band.pixels.read(500, 1000, size, size, data);
+      bandsData.push(data)
+    })
+    let allData = []
+    for (let i = 0; i < n; i++) {
+      let band1Value = bandsData[0][i]
+      let band2Value = bandsData[1][i]
+      let band3Value = bandsData[2][i]
+      let band4Value = 255
+      allData.push(band1Value)
+      allData.push(band2Value)
+      allData.push(band3Value)
+      allData.push(band4Value)
+    }
+    let uint8Array = Uint8Array.from(allData)   
+
+    imgData.data.set(uint8Array);
+    ctx.putImageData(imgData, 0, 0);
+    let imgUrl = canvas.toDataURL();
+    // console.log("number of bands: " + dataset.bands.count());
+    // console.log("width: " + dataset.rasterSize.x);
+    // console.log("height: " + dataset.rasterSize.y);
+    // console.log("geotransform: " + dataset.geoTransform);
+    // console.log("srs: " + (dataset.srs ? dataset.srs.toWKT() : 'null'));
+    // res.send(imgUrl)
+    res.send(imgUrl)
+
+  } catch (e) {
+    console.log(e);
+  } finally {
+    
+  }
+ 
 })
 
+/**
+ * **无切片**  
+ * 1、通过gdal读取tif文件，获取每个波段的数据
+ * 2、利用canvas在服务器端生成图像，转换为字符串，返回客户端
+ */
 router.get('/test/:x/:y/:z', (req, res, next) => {
-  let x = req.params.x
-  let y = req.params.y
-  let z = req.params.z.split('.')[0]
-  console.log(x, y, z);
-  let res_ = getIMG(res)
-  res_.send()
+  // let x = req.params.x
+  // let y = req.params.y
+  // let z = req.params.z.split('.')[0]
+  // console.log(x, y, z); 
+  try {
+    let dataset = gdal.open('./10.tif')
+    let bands = dataset.bands
+    let size = 256
+    var n = size * size;
+    let w = size, h = size;
+
+    const canvas = createCanvas(w, h)
+    var ctx = canvas.getContext("2d");
+    const imgData = ctx.createImageData(w, h);
+    // 用时35ms
+    let bandsData = []
+    bands.forEach((band, i) => {     
+      //read data into the existing array
+      var data = new Uint8Array(new ArrayBuffer(n));
+      band.pixels.read(500, 1000, size, size, data);
+      bandsData.push(data)
+    })
+    let allData = []
+    for (let i = 0; i < n; i++) {
+      let band1Value = bandsData[0][i]
+      let band2Value = bandsData[1][i]
+      let band3Value = bandsData[2][i]
+      let band4Value = 255
+      allData.push(band1Value)
+      allData.push(band2Value)
+      allData.push(band3Value)
+      allData.push(band4Value)
+    }
+    let uint8Array = Uint8Array.from(allData)   
+    imgData.data.set(uint8Array);
+    ctx.putImageData(imgData, 0, 0);
+    let imgUrl = canvas.toDataURL();    
+    res.send(imgUrl)
+
+  } catch (e) {
+    console.log(e);
+    res.send('dj')
+  }
 })
 
 module.exports = router
