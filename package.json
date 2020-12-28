@@ -10,11 +10,15 @@
     "cookie-parser": "~1.4.4",
     "debug": "~2.6.9",
     "express": "~4.16.1",
+    "gdal": "^0.10.1",
     "http-errors": "~1.6.3",
     "iconv-lite": "^0.6.2",
     "jade": "~1.11.0",
     "mongodb": "^3.5.7",
     "morgan": "~1.9.1",
     "mysql": "^2.18.1"
+  },
+  "devDependencies": {
+    "node-dev": "^6.2.0"
   }
 }

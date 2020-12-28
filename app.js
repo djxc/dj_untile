@@ -7,6 +7,7 @@ var dbConnect = require('./dao/connectMongodb')
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
+var onlineRouter = require('./routes/onlineTile');
 
 var app = express();
 //设置允许跨域访问该服务.
@@ -33,6 +34,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
+app.use('/onlineTile', onlineRouter)
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
