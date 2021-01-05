@@ -9,22 +9,26 @@ const fs = require('fs');
 const readline = require('readline');
 let iconv = require('iconv-lite')
 
+/**
+ * **编码转换**
+ * @param {*} result_data 
+ */
 function createFileAndWrite(result_data) {
-    let file = "/document/2020/test_djxc.csv";
-    let data = ""
-    for (let i in result_data) {
-        let userInfo = result_data[i]
-        data += userInfo.username + ', ' + userInfo.nick_name + ', ' + userInfo.sex + ', ' + userInfo.phone
-        data += '\n'
-    }
-    let str_ = iconv.encode(data, 'gbk');
-    fs.writeFile(file, str_, err => {
-        if (err) {
+  let file = "/document/2020/test_djxc.csv";
+  let data = ""
+  for (let i in result_data) {
+    let userInfo = result_data[i]
+    data += userInfo.username + ', ' + userInfo.nick_name + ', ' + userInfo.sex + ', ' + userInfo.phone
+    data += '\n'
+  }
+  let str_ = iconv.encode(data, 'gbk');
+  fs.writeFile(file, str_, err => {
+    if (err) {
 
-        } else {
-            console.log("写入成功");
-        }
-    })
+    } else {
+      console.log("写入成功");
+    }
+  })
 }
 
 /***********************************************************
@@ -35,41 +39,36 @@ function createFileAndWrite(result_data) {
  * @param x x坐标位置
  * @param y y坐标位置
  ***********************************************************/
-async function get_tile_index(z, x, y, callback) {
-    z = parseInt(z)
-    x = parseInt(x)
-    y = parseInt(y)
-    console.log(z, x, y);
-    const readInterface = readline.createInterface({
-      input: fs.createReadStream("/home/djxc/demo.json"),
-      output: false,
-      console: false
-    });
-    readInterface.on('line', function (line) {
+async function get_tile_index(z, x, y) {
+  z = parseInt(z)
+  x = parseInt(x)
+  y = parseInt(y)
+  const readInterface = readline.createInterface({
+    input: fs.createReadStream("/home/djxc/demo.json"),
+    output: false,
+    console: false
+  });
+  let tileInfo = {}
+  try {
+    for await (let line of readInterface) {
       line = line.trim()
-      // console.log(line, line.length);
-      try {
-        if (line.length > 1) {
-          let tileInfo = JSON.parse(line.slice(0, line.length - 1))
-          let { tz, tx, ty, rx, ry, rxsize, rysize, wxsize, wysize, wx, wy } = tileInfo
-          if (tz === z && tx === x && ty === y) {
-            console.log(tz, tx, ty, rx, ry, rxsize, rysize, wxsize, wysize, wx, wy);
-            callback(tileInfo)
-            readInterface.close()
-            // return tileInfo
-          }
+      if (line.length > 1) {
+        tileInfo = JSON.parse(line.slice(0, line.length - 1))
+        let { tz, tx, ty, rx, ry, rxsize, rysize, wxsize, wysize, wx, wy } = tileInfo
+        if (tz === z && tx === x && ty === y) {
+          readInterface.close()
+          return tileInfo
         }
-      } finally {
-        readInterface.close()
       }
-    });
-    console.log("djxc");
-    readInterface.on("close", ()=>{
-      console.log("dddd");
-    })
+    }
+  } finally {
+    readInterface.close()
   }
+  tileInfo = {}  
+  return tileInfo
+}
 
-module.exports ={
-    createFileAndWrite,
-    get_tile_index
+module.exports = {
+  createFileAndWrite,
+  get_tile_index
 } 

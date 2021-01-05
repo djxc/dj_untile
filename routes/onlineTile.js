@@ -8,8 +8,8 @@ var gdal = require('gdal');
 var router = express.Router();
 const { createCanvas, Image } = require('canvas')
 
-const {get_tile_index} = require("../src/util/operateFile");
-const {readIMG2imgURL} = require("../src/util/gdal_image");
+const { get_tile_index } = require("../src/util/operateFile");
+const { readIMG2imgURL, noIMGTileData } = require("../src/util/gdal_image");
 
 /**
  * **将图像放在响应中返回**
@@ -35,22 +35,18 @@ function getIMG(res) {
 /* GET home page. */
 router.get('/', function (req, res, next) {
   // console.log(req);
-  get_tile_index(19, 262143, 262140, (dd)=>{
-    console.log("----", dd);
-  });
-  console.log("-=-=-=-=");
-  let res_ = getIMG(res)
-  res_.send()
+  get_tile_index(19, 262143, 262140)
+    .then((tileInfo) => {
+      console.log("-=-=-=-=", tileInfo);
+      let res_ = getIMG(res)
+      res_.send()
+    }).catch((error) => {
+      console.log("-+-+-+-+-+", tileInfo);
+      let res_ = getIMG(res)
+      res_.send()
+    })
 });
 
-function toBuffer(ab) {
-  var buf = new Buffer.from(ab);
-  var view = new Uint8Array(ab);
-  for (var i = 0; i < buf.length; ++i) {
-    buf[i] = view[i];
-  }
-  return buf;
-}
 
 
 router.get('/gdal', (req, res, next) => {
@@ -88,12 +84,6 @@ router.get('/gdal', (req, res, next) => {
     imgData.data.set(uint8Array);
     ctx.putImageData(imgData, 0, 0);
     let imgUrl = canvas.toDataURL();
-    // console.log("number of bands: " + dataset.bands.count());
-    // console.log("width: " + dataset.rasterSize.x);
-    // console.log("height: " + dataset.rasterSize.y);
-    // console.log("geotransform: " + dataset.geoTransform);
-    // console.log("srs: " + (dataset.srs ? dataset.srs.toWKT() : 'null'));
-    // res.send(imgUrl)
     res.send(imgUrl)
 
   } catch (e) {
@@ -111,18 +101,34 @@ router.get('/gdal', (req, res, next) => {
  * 2、利用canvas在服务器端生成图像，转换为字符串，返回客户端
  * 3、根据请求的xyz找到该切片的位置信息
  */
-router.get('/test/:x/:y/:z', (req, res, next) => {
+router.get('/test/:z/:x/:y', (req, res, next) => {
+  let z = req.params.z
   let x = req.params.x
-  let y = req.params.y
-  let z = req.params.z.split('.')[0]
-  console.log(x, y, z);
-  try {
-    let imgUrl = readIMG2imgURL()  
-    res.send(imgUrl)
-  } catch (e) {
-    console.log(e);
-    res.send('dj')
-  }
+  let y = req.params.y.split('.')[0]
+  get_tile_index(z, x, y)
+    .then((tileInfo) => {
+      // console.log("-=-=-=-=", tileInfo);
+      if (!tileInfo.tx) {
+        console.log("could not find tile");
+        let imgUrl = noIMGTileData()
+        res.send(imgUrl)
+      } else {
+        try {
+          let { tz, tx, ty, rx, ry, rxsize, rysize, wxsize, wysize, wx, wy } = tileInfo
+          console.log(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy);
+          let imgUrl = readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy)
+          res.send(imgUrl)
+        } catch (e) {
+          console.log("error in read tif", e);
+          let imgUrl = noIMGTileData()
+          res.send(imgUrl)
+        }
+      }
+    }).catch((error) => {
+      console.log("could not find tile");
+      let imgUrl = noIMGTileData()
+      res.send(imgUrl)
+    })
 })
 
 module.exports = router
