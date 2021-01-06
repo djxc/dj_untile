@@ -6,11 +6,11 @@ const TILE_SIZE = 256;
  * **实时切片**  
  * 1、根据空间索引，利用gdal获取指定范围内的矩阵
  * 2、通过canvas将矩阵生成base64图像形式
+ * 3、wx与wy为图像的位置与左上角的偏移量；wxsize与wysize则为图像的长宽比例
  */
 function readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy) {
     let dataset = gdal.open('./10.tif')
     let bands = dataset.bands
-    let maxSize = rxsize > rysize ? rxsize : rysize
     var n = rxsize * rysize;
 
     const canvas = createCanvas(TILE_SIZE, TILE_SIZE)
@@ -26,31 +26,28 @@ function readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy) {
     })
     let allData = []
     // 计算缩放比例
-    let rxsizeScale = rxsize / TILE_SIZE
-    let rysizeScale = rysize / TILE_SIZE
+    let rxsizeScale = rxsize / (TILE_SIZE * (wxsize / 1024))
+    let rysizeScale = rysize / (TILE_SIZE * (wysize / 1024))
     let j = 0
-
-    let index = 0
+    // 如果wxsize 小于 wx则在右侧，否则在左侧；如果wysize 小于 wy在下侧，否则在上侧
+    let index = 0 // 在原矩阵中的行数
     for (j = 0; j < TILE_SIZE * TILE_SIZE; j++) {
         index = parseInt(rysizeScale * parseInt(j / TILE_SIZE))
-        let j_ = parseInt(parseInt(j % TILE_SIZE) * rxsizeScale + index * rxsize)
-        // rxsize为一行
-        let band1Value = bandsData[0][j_]
-        let band2Value = bandsData[1][j_]
-        let band3Value = bandsData[2][j_]
-        let band4Value = 255
+        let j_ = parseInt(parseInt(j % (TILE_SIZE)) * rxsizeScale + index * rxsize)
+        // 如果bandsData不存在则将其设为透明，否则不透明
+        let band4Value = bandsData[0][j_] ? 255 : 0
+        let band1Value = bandsData[0][j_] ? bandsData[0][j_] * 0.5 : 255
+        let band2Value = bandsData[1][j_] ? bandsData[0][j_] * 0.5: 255
+        let band3Value = bandsData[2][j_] ? bandsData[0][j_] * 0.5 : 255
         allData.push(band1Value)
         allData.push(band2Value)
         allData.push(band3Value)
         allData.push(band4Value)
+
     }
     let uint8Array = Uint8ClampedArray.from(allData)
     let imgData = new ImageData(uint8Array, TILE_SIZE, TILE_SIZE)
-    if (wy !== 0 || wx !== 0) {
-        ctx.putImageData(imgData, Math.round(wx / 13.47), Math.round(wy / 13.47), 0, 0, TILE_SIZE, TILE_SIZE);
-    } else {
-        ctx.putImageData(imgData, 0, 0, 0, 0, TILE_SIZE, TILE_SIZE);
-    }
+    ctx.putImageData(imgData, Math.round(wx / 1024 * 256), Math.round(wy / 1024 * 256), 0, 0, TILE_SIZE, TILE_SIZE);
     let imgUrl = canvas.toDataURL();
     return imgUrl
 }
