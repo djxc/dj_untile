@@ -7,6 +7,11 @@ const TILE_SIZE = 256;
  * 1、根据空间索引，利用gdal获取指定范围内的矩阵
  * 2、通过canvas将矩阵生成base64图像形式
  * 3、wx与wy为图像的位置与左上角的偏移量；wxsize与wysize则为图像的长宽比例
+ * 
+ * 1、单一客户访问情况下nginx响应为5-10ms；本服务为50-100ms。
+ * 2、node服务处理慢的原因可能为：
+ *  1) 读取文件获取空间索引。解决方案：将空间索引放在数据库中存储，查询速度块
+ *  2) gdal处理图像，重采样生成新的图像
  */
 function readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy) {
     let dataset = gdal.open('./10.tif')
@@ -32,13 +37,21 @@ function readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy) {
     // 如果wxsize 小于 wx则在右侧，否则在左侧；如果wysize 小于 wy在下侧，否则在上侧
     let index = 0 // 在原矩阵中的行数
     for (j = 0; j < TILE_SIZE * TILE_SIZE; j++) {
+        // index为原始矩阵的行数
         index = parseInt(rysizeScale * parseInt(j / TILE_SIZE))
-        let j_ = parseInt(parseInt(j % (TILE_SIZE)) * rxsizeScale + index * rxsize)
+        // col_index为原始矩阵的列数,如果col_index大于rxsize则将其后的像素设为透明
+        let col_index = parseInt(j % (TILE_SIZE)) * rxsizeScale
+        // j_为当前像素在原始数组的位置
+        let j_ = parseInt(col_index + index * rxsize)
+
         // 如果bandsData不存在则将其设为透明，否则不透明
         let band4Value = bandsData[0][j_] ? 255 : 0
-        let band1Value = bandsData[0][j_] ? bandsData[0][j_] * 0.5 : 255
-        let band2Value = bandsData[1][j_] ? bandsData[0][j_] * 0.5: 255
-        let band3Value = bandsData[2][j_] ? bandsData[0][j_] * 0.5 : 255
+        if(col_index > rxsize) {
+            band4Value = 0;
+        }
+        let band1Value = bandsData[0][j_] ? bandsData[0][j_] : 255
+        let band2Value = bandsData[1][j_] ? bandsData[1][j_] : 255
+        let band3Value = bandsData[2][j_] ? bandsData[2][j_] : 255
         allData.push(band1Value)
         allData.push(band2Value)
         allData.push(band3Value)

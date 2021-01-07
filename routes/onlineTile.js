@@ -107,15 +107,13 @@ router.get('/test/:z/:x/:y', (req, res, next) => {
   let y = req.params.y.split('.')[0]
   get_tile_index(z, x, y)
     .then((tileInfo) => {
-      // console.log("-=-=-=-=", tileInfo);
       if (!tileInfo.tx) {
-        console.log("could not find tile");
+        console.log("not find tile");
         let imgUrl = noIMGTileData()
         res.send(imgUrl)
       } else {
         try {
           let { tz, tx, ty, rx, ry, rxsize, rysize, wxsize, wysize, wx, wy } = tileInfo
-          console.log(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy);
           let imgUrl = readIMG2imgURL(rx, ry, rxsize, rysize, wxsize, wysize, wx, wy)
           res.send(imgUrl)
         } catch (e) {
@@ -125,7 +123,7 @@ router.get('/test/:z/:x/:y', (req, res, next) => {
         }
       }
     }).catch((error) => {
-      console.log("could not find tile");
+      console.log("not find tile");
       let imgUrl = noIMGTileData()
       res.send(imgUrl)
     })

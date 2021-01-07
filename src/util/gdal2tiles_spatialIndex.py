@@ -1770,3 +1770,9 @@ def generate_tiles(input_file, output_folder, **options):
         nb_processes = 2
 
     multi_threaded_tiling(input_file, output_folder, **options)
+
+    # python gdal2tiles_spatialIndex.py 
+
+
+if __name__ == "__main__":
+    generate_tiles("", "", {})
