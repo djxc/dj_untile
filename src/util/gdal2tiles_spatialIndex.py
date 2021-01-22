@@ -49,7 +49,7 @@ import shutil
 import sys
 from uuid import uuid4
 from xml.etree import ElementTree
-from bson.json_util import dumps
+import json
 
 try:
     # try to use billiard because it seems to works with Celery
@@ -131,6 +131,149 @@ DEFAULT_GDAL2TILES_OPTIONS = {
     'bingkey': 'INSERT_YOUR_KEY_HERE',
     'nb_processes': 1
 }
+
+def gettempfilename(suffix):
+    """Returns a temporary filename"""
+    if '_' in os.environ:
+        # tempfile.mktemp() crashes on some Wine versions (the one of Ubuntu 12.04 particularly)
+        if os.environ['_'].find('wine') >= 0:
+            tmpdir = '.'
+            if 'TMP' in os.environ:
+                tmpdir = os.environ['TMP']
+            import time
+            import random
+            random.seed(time.time())
+            random_part = 'file%d' % random.randint(0, 1000000000)
+            return os.path.join(tmpdir, random_part + suffix)
+
+    return tempfile.mktemp(suffix)
+
+def add_alpha_band_to_string_vrt(vrt_string):
+    # TODO: gbataille - Old code speak of this being equivalent to gdalwarp -dstalpha
+    # To be checked
+
+    vrt_root = ElementTree.fromstring(vrt_string)
+
+    index = 0
+    nb_bands = 0
+    for subelem in list(vrt_root):
+        if subelem.tag == "VRTRasterBand":
+            nb_bands += 1
+            color_node = subelem.find("./ColorInterp")
+            if color_node is not None and color_node.text == "Alpha":
+                raise Exception("Alpha band already present")
+        else:
+            if nb_bands:
+                # This means that we are one element after the Band definitions
+                break
+
+        index += 1
+
+    tb = ElementTree.TreeBuilder()
+    tb.start("VRTRasterBand",
+             {'dataType': "Byte", "band": str(nb_bands + 1), "subClass": "VRTWarpedRasterBand"})
+    tb.start("ColorInterp", {})
+    tb.data("Alpha")
+    tb.end("ColorInterp")
+    tb.end("VRTRasterBand")
+    elem = tb.close()
+
+    vrt_root.insert(index, elem)
+
+    warp_options = vrt_root.find(".//GDALWarpOptions")
+    tb = ElementTree.TreeBuilder()
+    tb.start("DstAlphaBand", {})
+    tb.data(str(nb_bands + 1))
+    tb.end("DstAlphaBand")
+    elem = tb.close()
+    warp_options.append(elem)
+
+    # TODO: gbataille - this is a GDALWarpOptions. Why put it in a specific place?
+    tb = ElementTree.TreeBuilder()
+    tb.start("Option", {"name": "INIT_DEST"})
+    tb.data("0")
+    tb.end("Option")
+    elem = tb.close()
+    warp_options.append(elem)
+
+    return ElementTree.tostring(vrt_root).decode()
+class AttrDict(object):
+    """
+    Helper class to provide attribute like access (read and write) to
+    dictionaries. Used to provide a convenient way to access both results and
+    nested dsl dicts.
+    """
+    def __init__(self, d={}):
+        # assign the inner dict manually to prevent __setattr__ from firing
+        super(AttrDict, self).__setattr__('_d_', d)
+
+    def __contains__(self, key):
+        return key in self._d_
+
+    def __nonzero__(self):
+        return bool(self._d_)
+    __bool__ = __nonzero__
+
+    def __dir__(self):
+        # introspection for auto-complete in IPython etc
+        return list(self._d_.keys())
+
+    def __eq__(self, other):
+        if isinstance(other, AttrDict):
+            return other._d_ == self._d_
+        # make sure we still equal to a dict with the same data
+        return other == self._d_
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __repr__(self):
+        r = repr(self._d_)
+        if len(r) > 60:
+            r = r[:60] + '...}'
+        return r
+
+    def __getstate__(self):
+        return (self._d_, )
+
+    def __setstate__(self, state):
+        super(AttrDict, self).__setattr__('_d_', state[0])
+
+    def __getattr__(self, attr_name):
+        try:
+            return self.__getitem__(attr_name)
+        except KeyError:
+            raise AttributeError(
+                '%r object has no attribute %r' % (self.__class__.__name__, attr_name))
+
+    def __delattr__(self, attr_name):
+        try:
+            del self._d_[attr_name]
+        except KeyError:
+            raise AttributeError(
+                '%r object has no attribute %r' % (self.__class__.__name__, attr_name))
+
+    def __getitem__(self, key):
+        return self._d_[key]
+
+    def __setitem__(self, key, value):
+        self._d_[key] = value
+
+    def __delitem__(self, key):
+        del self._d_[key]
+
+    def __setattr__(self, name, value):
+        if name in self._d_ or not hasattr(self.__class__, name):
+            self._d_[name] = value
+        else:
+            # there is an attribute on the class (could be property, ..) - don't add it as field
+            super(AttrDict, self).__setattr__(name, value)
+
+    def __iter__(self):
+        return iter(self._d_)
+
+    def to_dict(self):
+        return self._d_
 
 class Zoomify(object):
     """
@@ -262,7 +405,7 @@ def process_options(input_file, output_folder, options={}):
     '''
     _options = DEFAULT_GDAL2TILES_OPTIONS.copy()
     _options.update(options)
-    # options = AttrDict(_options)
+    options = AttrDict(_options)
     options = options_post_processing(options, input_file, output_folder)
     return options
 
@@ -1300,28 +1443,7 @@ class GDAL2Tiles(object):
             north, east = self.mercator.MetersToLatLon(self.omaxx, self.omaxy)
             south, west = max(-85.05112878, south), max(-180.0, west)
             north, east = min(85.05112878, north), min(180.0, east)
-            self.swne = (south, west, north, east)
-
-            # Generate googlemaps.html
-            if self.options.webviewer in ('all', 'google') and self.options.profile == 'mercator':
-                if (not self.options.resume or not
-                        os.path.exists(os.path.join(self.output_folder, 'googlemaps.html'))):
-                    with open(os.path.join(self.output_folder, 'googlemaps.html'), 'wb') as f:
-                        f.write(self.generate_googlemaps().encode('utf-8'))
-
-            # Generate openlayers.html
-            if self.options.webviewer in ('all', 'openlayers'):
-                if (not self.options.resume or not
-                        os.path.exists(os.path.join(self.output_folder, 'openlayers.html'))):
-                    with open(os.path.join(self.output_folder, 'openlayers.html'), 'wb') as f:
-                        f.write(self.generate_openlayers().encode('utf-8'))
-
-            # Generate leaflet.html
-            if self.options.webviewer in ('all', 'leaflet'):
-                if (not self.options.resume or not
-                        os.path.exists(os.path.join(self.output_folder, 'leaflet.html'))):
-                    with open(os.path.join(self.output_folder, 'leaflet.html'), 'wb') as f:
-                        f.write(self.generate_leaflet().encode('utf-8'))
+            self.swne = (south, west, north, east)            
 
         elif self.options.profile == 'geodetic':
 
@@ -1330,13 +1452,7 @@ class GDAL2Tiles(object):
             south, west = max(-90.0, south), max(-180.0, west)
             north, east = min(90.0, north), min(180.0, east)
             self.swne = (south, west, north, east)
-
-            # Generate openlayers.html
-            if self.options.webviewer in ('all', 'openlayers'):
-                if (not self.options.resume or not
-                        os.path.exists(os.path.join(self.output_folder, 'openlayers.html'))):
-                    with open(os.path.join(self.output_folder, 'openlayers.html'), 'wb') as f:
-                        f.write(self.generate_openlayers().encode('utf-8'))
+           
 
         elif self.options.profile == 'raster':
 
@@ -1344,18 +1460,7 @@ class GDAL2Tiles(object):
             east, north = self.omaxx, self.omaxy
 
             self.swne = (south, west, north, east)
-
-            # Generate openlayers.html
-            if self.options.webviewer in ('all', 'openlayers'):
-                if (not self.options.resume or not
-                        os.path.exists(os.path.join(self.output_folder, 'openlayers.html'))):
-                    with open(os.path.join(self.output_folder, 'openlayers.html'), 'wb') as f:
-                        f.write(self.generate_openlayers().encode('utf-8'))
-
-        # Generate tilemapresource.xml.
-        if not self.options.resume or not os.path.exists(os.path.join(self.output_folder, 'tilemapresource.xml')):
-            with open(os.path.join(self.output_folder, 'tilemapresource.xml'), 'wb') as f:
-                f.write(self.generate_tilemapresource().encode('utf-8'))
+           
 
         if self.kml:
             # TODO: Maybe problem for not automatically generated tminz
@@ -1469,7 +1574,7 @@ class GDAL2Tiles(object):
                             wx=wx, wy=wy, wxsize=wxsize, wysize=wysize, 
                             querysize=querysize,
                         )
-                    tile_details_strs += dumps({ 
+                    tile_details_strs += json.dumps({ 
                         "tx": tx, "ty": ty, "tz": tz, 
                         "rx": rx, "ry": ry, "rxsize": rxsize, "rysize": rysize, 
                         "wx": wx, "wy": wy, "wxsize": wxsize, "wysize": wysize, 
@@ -1655,6 +1760,7 @@ def get_tile_swne(tile_job_info, options):
 def multi_threaded_tiling(input_file, output_folder, **options):
     """多进程切片
     Generate tiles with multi processing."""
+    print(options)
     # 对传入的参数进行处理
     options = process_options(input_file, output_folder, options)
 
@@ -1775,4 +1881,4 @@ def generate_tiles(input_file, output_folder, **options):
 
 
 if __name__ == "__main__":
-    generate_tiles("", "", {})
+    generate_tiles("/2020/japan_origin.tif", "./")
